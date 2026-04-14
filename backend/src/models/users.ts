@@ -1,0 +1,11 @@
+import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+
+const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export default users;

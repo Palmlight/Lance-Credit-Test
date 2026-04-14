@@ -1,0 +1,193 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #102a43;
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 102, 0.45), transparent 30%),
+    linear-gradient(180deg, #f4f7fb 0%, #eef2f7 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.85rem 1.2rem;
+  background: #0b6e4f;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+input {
+  width: 100%;
+  border: 1px solid #d9e2ec;
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  margin-top: 0.4rem;
+  background: #fff;
+}
+
+label {
+  font-size: 0.95rem;
+  color: #243b53;
+}
+
+.app-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.25rem;
+  align-items: stretch;
+  margin-bottom: 1.5rem;
+}
+
+.hero h1,
+.card h2 {
+  margin-top: 0;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.75rem;
+  color: #486581;
+}
+
+.hero-copy {
+  max-width: 60ch;
+  color: #334e68;
+}
+
+.status-card,
+.card {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(138, 151, 173, 0.18);
+  border-radius: 24px;
+  padding: 1.25rem;
+  box-shadow: 0 20px 50px rgba(16, 42, 67, 0.08);
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.status-label,
+.muted,
+.feedback p,
+.transaction-meta span {
+  color: #627d98;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.stack {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.feedback {
+  padding: 1rem 0;
+}
+
+.error {
+  color: #b42318;
+}
+
+.pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pill {
+  background: #d9f2e6;
+  color: #0b6e4f;
+}
+
+.pill.active {
+  background: #0b6e4f;
+  color: #fff;
+}
+
+.section-heading,
+.transaction-row,
+.transaction-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.transaction-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.transaction-row {
+  align-items: center;
+  border: 1px solid #e4e7eb;
+  border-radius: 18px;
+  padding: 1rem;
+  background: #fff;
+}
+
+.transaction-row p {
+  margin-bottom: 0;
+}
+
+.transaction-meta {
+  flex-direction: column;
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .hero,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .transaction-row,
+  .section-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .transaction-meta {
+    text-align: left;
+  }
+}
+
