@@ -158,7 +158,10 @@ DATABASE_URL=postgresql://USERNAME:PASSWORD@YOUR-HOST.us-east-1.aws.neon.tech/la
 DATABASE_SSL=true
 JWT_SECRET=replace-this-with-a-long-random-secret
 JWT_EXPIRES_IN=1d
+CORS_ORIGIN=http://localhost:5173
 ```
+
+`CORS_ORIGIN` can also be a comma-separated list in production, for example your main frontend URL plus a preview URL.
 
 If you want to use a local PostgreSQL database instead, you can still do that:
 
