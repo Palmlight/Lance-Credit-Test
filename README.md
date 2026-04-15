@@ -1,5 +1,10 @@
 # Lance Credit Test
 
+
+Frontend URL: https://lance-credit-test-frontend.vercel.app/
+
+Backend URL: https://lance-credit-test.onrender.com
+
 This repository contains a full-stack wallet service with a TypeScript/Express backend, a React/Vite frontend, and PostgreSQL for persistence.
 
 The project supports:
