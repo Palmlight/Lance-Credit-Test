@@ -1,10 +1,9 @@
 import bcrypt from "bcryptjs";
 import type { Request, Response } from "express";
 import { z } from "zod";
-import { executeIdempotent } from "../../services/idempotencyService.js";
+import { withSerializableTransaction } from "../../db/pool.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/errors.js";
-import { hashPayload } from "../../utils/hash.js";
 import { authService } from "./auth.service.js";
 import { userService } from "../user/user.service.js";
 
@@ -25,39 +24,25 @@ export const loginValidation = loginSchema;
 export class AuthController {
   register = asyncHandler(async (request: Request, response: Response) => {
     const payload = registerSchema.parse(request.body);
-    const idempotencyKey = request.header("x-idempotency-key") ?? undefined;
 
-    const result = await executeIdempotent(
-      {
-        scope: "auth-register",
-        key: idempotencyKey,
-        requestHash: hashPayload({ ...payload, email: payload.email.toLowerCase() })
-      },
-      async (tx) => {
-        const existingUser = await userService.findUserByEmail(payload.email);
+    const authResponse = await withSerializableTransaction(async (tx) => {
+      const existingUser = await userService.findUserByEmail(payload.email);
 
-        if (existingUser) {
-          throw new ApiError(409, "An account with this email already exists");
-        }
-
-        const passwordHash = await bcrypt.hash(payload.password, 12);
-        const user = await userService.createUserWithWallet(tx, {
-          name: payload.name,
-          email: payload.email,
-          passwordHash
-        });
-
-        return {
-          statusCode: 201,
-          body: authService.buildAuthResponse(user)
-        };
+      if (existingUser) {
+        throw new ApiError(409, "An account with this email already exists");
       }
-    );
 
-    response.status(result.statusCode).json({
-      ...result.body,
-      replayed: result.replayed
+      const passwordHash = await bcrypt.hash(payload.password, 12);
+      const user = await userService.createUserWithWallet(tx, {
+        name: payload.name,
+        email: payload.email,
+        passwordHash
+      });
+
+      return authService.buildAuthResponse(user);
     });
+
+    response.status(201).json(authResponse);
   });
 
   login = asyncHandler(async (request: Request, response: Response) => {

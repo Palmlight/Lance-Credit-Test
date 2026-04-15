@@ -1,0 +1,1 @@
+ALTER TABLE "wallets" ADD COLUMN "balance" bigint DEFAULT 0 NOT NULL;

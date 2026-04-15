@@ -1,10 +1,8 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { withSerializableTransaction } from "../../db/pool.js";
-import { executeIdempotent } from "../../services/idempotencyService.js";
 import { asyncHandler } from "../../utils/asyncHandler.js";
 import { ApiError } from "../../utils/errors.js";
-import { hashPayload } from "../../utils/hash.js";
 import { walletService } from "./wallet.service.js";
 
 const moneySchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -56,62 +54,30 @@ export class WalletController {
   postDeposit = asyncHandler(async (request: Request, response: Response) => {
     const payload = depositSchema.parse(request.body);
     const userId = this.getAuthenticatedUserId(request);
-    const idempotencyKey = request.header("x-idempotency-key") ?? undefined;
 
-    const result = await executeIdempotent(
-      {
-        scope: "wallet-deposit",
-        key: idempotencyKey,
-        requestHash: hashPayload({ user_id: userId, amount: payload.amount })
-      },
-      async (tx) => {
-        const deposit = await walletService.depositFunds(tx, {
-          userId,
-          amount: payload.amount
-        });
-
-        return {
-          statusCode: 201,
-          body: deposit
-        };
-      }
+    const deposit = await withSerializableTransaction((tx) =>
+      walletService.depositFunds(tx, {
+        userId,
+        amount: payload.amount
+      })
     );
 
-    response.status(result.statusCode).json({
-      ...result.body,
-      replayed: result.replayed
-    });
+    response.status(201).json(deposit);
   });
 
   postTransfer = asyncHandler(async (request: Request, response: Response) => {
     const payload = transferSchema.parse(request.body);
     const fromUserId = this.getAuthenticatedUserId(request);
-    const idempotencyKey = request.header("x-idempotency-key") ?? undefined;
 
-    const result = await executeIdempotent(
-      {
-        scope: "wallet-transfer",
-        key: idempotencyKey,
-        requestHash: hashPayload({ from_user_id: fromUserId, ...payload })
-      },
-      async (tx) => {
-        const transfer = await walletService.transferFunds(tx, {
-          fromUserId,
-          toUserId: payload.to_user_id,
-          amount: payload.amount
-        });
-
-        return {
-          statusCode: 201,
-          body: transfer
-        };
-      }
+    const transfer = await withSerializableTransaction((tx) =>
+      walletService.transferFunds(tx, {
+        fromUserId,
+        toUserId: payload.to_user_id,
+        amount: payload.amount
+      })
     );
 
-    response.status(result.statusCode).json({
-      ...result.body,
-      replayed: result.replayed
-    });
+    response.status(201).json(transfer);
   });
 
   getMyBalance = asyncHandler(async (request: Request, response: Response) => {

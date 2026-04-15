@@ -2,7 +2,6 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { env } from "../config/env.js";
-import idempotencyKeys from "../models/idempotencyKeys.js";
 import ledgerEntries from "../models/ledgerEntries.js";
 import ledgerTransactions from "../models/ledgerTransactions.js";
 import users from "../models/users.js";
@@ -13,8 +12,7 @@ const schema = {
   users,
   wallets,
   ledgerTransactions,
-  ledgerEntries,
-  idempotencyKeys
+  ledgerEntries
 };
 
 export const pool = new Pool({

@@ -18,3 +18,20 @@ export function isPgSerializationError(error: unknown): boolean {
   );
 }
 
+export function isPgUniqueViolation(error: unknown, constraintName?: string): boolean {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("code" in error) ||
+    error.code !== "23505"
+  ) {
+    return false;
+  }
+
+  if (constraintName) {
+    return "constraint" in error && error.constraint === constraintName;
+  }
+
+  return true;
+}
+

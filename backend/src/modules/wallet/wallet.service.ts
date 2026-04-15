@@ -1,7 +1,8 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { AppTransaction } from "../../db/pool.js";
 import ledgerEntries from "../../models/ledgerEntries.js";
 import ledgerTransactions from "../../models/ledgerTransactions.js";
+import wallets from "../../models/wallets.js";
 import { ApiError } from "../../utils/errors.js";
 
 type WalletRow = {
@@ -32,44 +33,45 @@ export class WalletService {
     return result.rows;
   }
 
-  private async getBalanceForWallet(tx: AppTransaction, walletId: string): Promise<number> {
-    const result = await tx.execute<{ balance: number | null }>(sql`
-      SELECT COALESCE(SUM(
-        CASE
-          WHEN entry_type = 'credit' THEN amount
-          ELSE -amount
-        END
-      ), 0)::bigint AS balance
-      FROM ledger_entries
-      WHERE wallet_id = ${walletId}
-    `);
+  private async incrementWalletBalance(
+    tx: AppTransaction,
+    walletId: string,
+    amount: number
+  ): Promise<number> {
+    const result = await tx
+      .update(wallets)
+      .set({ balance: sql`${wallets.balance} + ${amount}` })
+      .where(eq(wallets.id, walletId))
+      .returning({ balance: wallets.balance });
 
-    return Number(result.rows[0]?.balance ?? 0);
+    return result[0].balance;
   }
 
   async getBalanceByUserId(
     tx: AppTransaction,
     userId: string
   ): Promise<{ user_id: string; balance: number }> {
-    const walletRows = await this.getWalletsForUsers(tx, [userId], false);
-    const wallet = walletRows[0];
+    const result = await tx
+      .select({ balance: wallets.balance })
+      .from(wallets)
+      .where(eq(wallets.userId, userId))
+      .limit(1);
 
-    if (!wallet) {
+    if (result.length === 0) {
       throw new ApiError(404, "User wallet not found");
     }
 
-    const balance = await this.getBalanceForWallet(tx, wallet.wallet_id);
-
-    return {
-      user_id: userId,
-      balance
-    };
+    return { user_id: userId, balance: result[0].balance };
   }
 
   async depositFunds(
     tx: AppTransaction,
     input: { userId: string; amount: number }
   ) {
+    if (input.amount <= 0) {
+      throw new ApiError(400, "Amount must be greater than zero");
+    }
+
     const walletRows = await this.getWalletsForUsers(tx, [input.userId], true);
     const wallet = walletRows[0];
 
@@ -97,7 +99,7 @@ export class WalletService {
       amount: input.amount
     });
 
-    const balance = await this.getBalanceForWallet(tx, wallet.wallet_id);
+    const balance = await this.incrementWalletBalance(tx, wallet.wallet_id, input.amount);
 
     return {
       transaction_id: ledgerTransaction.id,
@@ -112,6 +114,10 @@ export class WalletService {
     tx: AppTransaction,
     input: { fromUserId: string; toUserId: string; amount: number }
   ) {
+    if (input.amount <= 0) {
+      throw new ApiError(400, "Amount must be greater than zero");
+    }
+
     if (input.fromUserId === input.toUserId) {
       throw new ApiError(400, "Cannot transfer funds to the same wallet");
     }
@@ -129,9 +135,13 @@ export class WalletService {
       throw new ApiError(404, "Recipient wallet not found");
     }
 
-    const senderBalance = await this.getBalanceForWallet(tx, sender.wallet_id);
+    const senderWallet = await tx
+      .select({ balance: wallets.balance })
+      .from(wallets)
+      .where(eq(wallets.id, sender.wallet_id))
+      .limit(1);
 
-    if (senderBalance < input.amount) {
+    if (senderWallet[0].balance < input.amount) {
       throw new ApiError(400, "Insufficient funds");
     }
 
@@ -164,14 +174,15 @@ export class WalletService {
       }
     ]);
 
-    const updatedSenderBalance = await this.getBalanceForWallet(tx, sender.wallet_id);
+    const balanceAfterTransfer = await this.incrementWalletBalance(tx, sender.wallet_id, -input.amount);
+    await this.incrementWalletBalance(tx, recipient.wallet_id, input.amount);
 
     return {
       transaction_id: ledgerTransaction.id,
       from_user_id: input.fromUserId,
       to_user_id: input.toUserId,
       amount: input.amount,
-      balance_after_transfer: updatedSenderBalance,
+      balance_after_transfer: balanceAfterTransfer,
       created_at: ledgerTransaction.created_at
     };
   }

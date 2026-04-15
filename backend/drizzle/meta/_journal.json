@@ -15,6 +15,20 @@
       "when": 1776157825216,
       "tag": "0001_needy_franklin_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776190534872,
+      "tag": "0002_demonic_hannibal_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1776245328744,
+      "tag": "0003_silky_morlun",
+      "breakpoints": true
     }
   ]
 }
