@@ -1,141 +1,146 @@
 # Lance Credit Test
 
-This repository contains a wallet service built with:
+This repository contains a full-stack wallet service with a TypeScript/Express backend, a React/Vite frontend, and PostgreSQL for persistence.
 
-- Backend: Node.js, TypeScript, Express, PostgreSQL, Drizzle ORM
-- Frontend: React.js with Vite
+The project supports:
 
-The system uses a ledger-first design. Wallet balances are never stored as the source of truth; instead, the current balance is derived from immutable ledger entries.
+- user registration and login with JWTs
+- wallet deposits
+- wallet-to-wallet transfers
+- balance lookup
+- transaction history lookup
 
-## Architecture
+## System Architecture
+
+### High-level flow
+
+1. The React frontend calls the Express API over HTTP.
+2. The backend authenticates users with JWT bearer tokens.
+3. Financial operations run inside PostgreSQL transactions through Drizzle ORM.
+4. Each money movement creates immutable ledger records and updates wallet balance snapshots.
+
+```text
+Frontend (React + Vite)
+        |
+        v
+Backend API (Express + TypeScript)
+        |
+        v
+Service Layer (auth, user, wallet)
+        |
+        v
+PostgreSQL + Drizzle ORM
+        |
+        +-- users
+        +-- wallets
+        +-- ledger_transactions
+        +-- ledger_entries
+```
 
 ### Backend
 
-The backend exposes these main endpoints:
+The backend is organized by module:
+
+- `backend/src/modules/auth`: registration, login, and current-user lookup
+- `backend/src/modules/user`: user creation compatibility route and user data access
+- `backend/src/modules/wallet`: deposits, transfers, balances, and transaction history
+- `backend/src/middleware`: auth, validation, and centralized error handling
+- `backend/src/models`: Drizzle table definitions for the database schema
+- `backend/src/db`: PostgreSQL pool setup and serializable transaction helper
+
+Main API routes:
 
 - `POST /auth/register`
 - `POST /auth/login`
 - `GET /auth/me`
+- `POST /users`
 - `POST /wallet/deposit`
 - `POST /wallet/transfer`
-- `GET /wallet/me/transactions`
 - `GET /wallet/me/balance`
+- `GET /wallet/me/transactions`
+- `GET /wallet/:userId/balance`
+- `GET /wallet/:userId/transactions`
+- `GET /health`
 
-For compatibility with the original “create user” requirement, `POST /users` is wired to the same registration flow as `POST /auth/register`.
+### Data model
 
-The backend uses `Drizzle ORM` instead of Prisma, Objection, or Knex. I chose Drizzle because it gives us:
+The core tables are:
 
-- strongly typed models in TypeScript
-- a schema defined in code inside `src/models`
-- PostgreSQL-friendly control for transactions, row locks, checks, and custom ledger queries
-- versioned SQL migrations that can be committed to the repository
-- a lighter runtime than Prisma, while staying closer to the database for finance-heavy logic
-
-Core models:
-
-- `users`: account holder records and credentials
-- `wallets`: one wallet per user
-- `ledger_transactions`: business-level transaction records such as deposits and transfers
-- `ledger_entries`: debit and credit entries that form the ledger
-- `idempotency_keys`: deduplicates repeated POST requests
+- `users`: account identity and hashed credentials
+- `wallets`: one wallet per user plus the current balance snapshot
+- `ledger_transactions`: business-level deposit and transfer records
+- `ledger_entries`: the debit and credit entries linked to each transaction
 
 ### Frontend
 
-The frontend is a simple React/Vite UI that lets a user:
+The frontend is a small single-page React app that:
 
-- register an account and wallet
-- log in with email and password
-- deposit funds into their own wallet
-- transfer funds from their own wallet to another user
-- inspect their balance
-- inspect their transaction history
+- registers new users
+- logs users in and stores the JWT in local storage
+- calls authenticated wallet endpoints
+- displays current balance and transaction history
+- provides forms for deposit and transfer actions
 
 ## Key Design Decisions
 
-### 1. Ledger entries are the source of truth
+### 1. Ledger records plus balance snapshots
 
-Balances are derived by summing ledger entries:
+The system stores immutable transaction and ledger-entry history, but it also keeps a `wallets.balance` snapshot for fast reads.
 
-- credits add value
-- debits subtract value
+That gives us:
 
-This avoids drift between a stored balance and the underlying transaction record.
+- an auditable record of every money movement
+- a simple way to reconstruct what happened
+- faster balance reads than recalculating from the ledger on every request
 
-### 2. Transfers are atomic
+### 2. Financial writes are transactional
 
-Each financial write runs inside a single PostgreSQL transaction with `SERIALIZABLE` isolation.
+Deposits and transfers run inside PostgreSQL transactions with `SERIALIZABLE` isolation. The backend retries serialization failures up to three times.
 
-For transfers:
+For transfers specifically:
 
-- both wallet rows are locked with `FOR UPDATE`
-- the sender balance is recomputed inside the transaction
-- debit and credit entries are inserted together
-- if any step fails, the whole transaction rolls back
+- both wallets are looked up inside the same transaction
+- sender and recipient rows are locked with `FOR UPDATE`
+- insufficient funds are checked after the lock is taken
+- ledger records and balance updates are committed together or rolled back together
 
-This prevents partial updates and keeps the ledger balanced.
+### 3. JWT-based authentication
 
-### 3. Concurrency safety
+The API uses JWT bearer tokens instead of a shared API key. That keeps wallet actions tied to the authenticated user and prevents the client from choosing an arbitrary sender wallet during transfers.
 
-To prevent race conditions and double spending when multiple transfers hit the same wallet:
+### 4. Schema-first persistence with Drizzle
 
-- wallet rows are locked before checking balance
-- concurrent transfers from the same wallet serialize on the lock
-- balance checks happen only after the lock is held
-- PostgreSQL serializable isolation adds an additional correctness guard
+I used Drizzle ORM because it fits a database-heavy service well:
 
-### 4. JWT-based authentication and authorization
+- the schema lives in TypeScript
+- PostgreSQL behavior stays visible and controllable
+- SQL migrations are generated into versioned files under `backend/drizzle`
+- the code stays close to the database for transaction and locking logic
 
-The application now uses JWT access tokens instead of a shared API key.
+### 5. Thin frontend, heavier backend rules
 
-This gives the system:
-
-- per-user identity
-- scoped access to a user’s own wallet
-- a more realistic frontend-to-backend auth model
-- a better foundation for roles, refresh tokens, and stronger session controls later
-
-Transfers no longer trust a client-supplied `from_user_id`. The sender is derived from the authenticated JWT subject.
-
-### 5. Basic security
-
-This take-home includes simple but useful protections:
-
-- JWT authentication with bearer tokens
-- password hashing with `bcryptjs`
-- request validation with `zod`
-- idempotency keys to reduce duplicate financial writes
-- `helmet` and `cors` configuration
-
-## Why Drizzle Over Prisma
-
-Prisma is a very good choice for CRUD-heavy applications, but for this wallet service I preferred Drizzle because:
-
-- this project needs SQL-first control for ledger queries, row locking, and serializable transactions
-- Drizzle stays closer to PostgreSQL, which is helpful in financial systems where database behavior matters a lot
-- the schema is plain TypeScript and easy to keep alongside the service layer
-- generated SQL migrations are simple to inspect and review
-- there is less tooling overhead than Prisma Client generation
-
-If this were a more CRUD-centric product with less custom SQL and less database-level concurrency work, Prisma would also be a strong option.
+The frontend is intentionally simple. Validation, authentication, transaction handling, and business invariants are enforced in the backend, which is the right place for finance-related correctness.
 
 ## Assumptions
 
-- Amounts are integer minor units, for example `5000` means 5,000 cents or the smallest currency unit.
-- One wallet exists per user.
-- Deposits are treated as trusted internal credits rather than external payment-processor events.
-- This project uses access tokens only. A production system would typically add refresh tokens, revocation, and stronger key management.
+- Amounts are stored as integer minor units. For example, `5000` means 5,000 cents or the smallest currency unit.
+- Each user has exactly one wallet.
+- Deposits are trusted internal credits, not external payment-processor events.
+- This project uses access tokens only; refresh tokens and token revocation are out of scope.
+- The balance snapshot in `wallets` is treated as the fast-read representation, while the ledger tables remain the audit trail.
+- The frontend is intended as a functional demo client, not a production-ready banking UI.
 
-## Project Structure
+## How To Run Locally
 
-- [backend](/Users/ndonnauc/Documents/Lance%20Credit%20Test/backend)
-- [backend/src/models](/Users/ndonnauc/Documents/Lance%20Credit%20Test/backend/src/models)
-- [backend/drizzle.config.ts](/Users/ndonnauc/Documents/Lance%20Credit%20Test/backend/drizzle.config.ts)
-- [backend/drizzle](/Users/ndonnauc/Documents/Lance%20Credit%20Test/backend/drizzle)
-- [frontend](/Users/ndonnauc/Documents/Lance%20Credit%20Test/frontend)
+### 1. Install dependencies
 
-## Run Locally
+From the repository root:
 
-### 1. Create environment files
+```bash
+npm install
+```
+
+### 2. Create environment files
 
 Backend:
 
@@ -149,152 +154,121 @@ Frontend:
 cp frontend/.env.example frontend/.env
 ```
 
-### 2. Configure PostgreSQL
+### 3. Start PostgreSQL
 
-Set `DATABASE_URL` in `backend/.env` to your provider connection string. Example format:
+The easiest local option is Docker:
+
+```bash
+docker compose up -d
+```
+
+This starts PostgreSQL on `localhost:5432` with:
+
+- database: `wallet_service`
+- user: `postgres`
+- password: `postgres`
+
+If you prefer your own PostgreSQL instance, that works too.
+
+### 4. Configure the backend env
+
+For local Docker PostgreSQL, `backend/.env` can look like this:
 
 ```env
-DATABASE_URL=postgresql://USERNAME:PASSWORD@YOUR-HOST.us-east-1.aws.neon.tech/lance_credit_test?sslmode=require
-DATABASE_SSL=true
-JWT_SECRET=replace-this-with-a-long-random-secret
+PORT=4000
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/wallet_service
+DATABASE_SSL=false
+JWT_SECRET=super-secret
 JWT_EXPIRES_IN=1d
 CORS_ORIGIN=http://localhost:5173
 ```
 
-`CORS_ORIGIN` can also be a comma-separated list in production, for example your main frontend URL plus a preview URL.
-
-If you want to use a local PostgreSQL database instead, you can still do that:
+For the frontend, `frontend/.env` should contain:
 
 ```env
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/wallet_service
-DATABASE_SSL=false
+VITE_API_URL=http://localhost:4000
 ```
 
-### 3. Install dependencies
+### 5. Apply database schema
 
-From the repository root:
-
-```bash
-npm install
-```
-
-### 4. Migration workflow
-
-Generate a new migration after changing the models:
-
-```bash
-npm run db:generate --workspace backend
-```
-
-Apply committed migrations to the database:
+Run the committed migrations:
 
 ```bash
 npm run db:migrate --workspace backend
 ```
 
-For quick local prototyping only, you can still push schema changes directly without creating a migration:
+If you change the schema later, generate a new migration with:
 
 ```bash
-npm run db:push --workspace backend
+npm run db:generate --workspace backend
 ```
 
-Recommended usage:
-
-- use `db:generate` when the schema changes
-- commit the files inside `backend/drizzle`
-- use `db:migrate` in shared or production-like environments
-- reserve `db:push` for throwaway local development
-
-Note: if you already applied the earlier pre-JWT schema in a local database, the new auth migration assumes the `users` table can accept required `email` and `password_hash` columns. On a fresh setup this is fine; on an older prototype database, reset the local DB or backfill those values before migrating.
-
-### 5. Run the backend
+### 6. Start the backend
 
 ```bash
 npm run dev:backend
 ```
 
-The API will start on `http://localhost:4000`.
+The API will be available at `http://localhost:4000`.
 
-### 6. Run the frontend
+### 7. Start the frontend
+
+In a second terminal:
 
 ```bash
 npm run dev:frontend
 ```
 
-The UI will start on `http://localhost:5173`.
+The app will be available at `http://localhost:5173`.
 
-## API Notes
+## Useful Notes
 
-Protected endpoints require:
+- Protected wallet routes require `Authorization: Bearer <token>`.
+- The frontend automatically stores the JWT after login/register.
+- The backend exposes `GET /health` for a quick health check.
+- The repository root is configured as an npm workspace for `backend` and `frontend`.
 
-- `Authorization: Bearer <JWT_TOKEN>`
+## How I Would Scale This To 10 Million Transactions Per Day
 
-Financial `POST` requests should also send:
+At that volume, I would keep the same core ledger and transactional model, but I would change the surrounding infrastructure so the database is reserved for the most critical synchronous work.
 
-- `x-idempotency-key: <unique-client-generated-key>`
+### Infrastructure
 
-Example register request:
+- Run the API as multiple stateless application instances behind a load balancer.
+- Separate read and write traffic where possible, with a primary PostgreSQL node for writes and replicas for safe read-heavy endpoints.
+- Use autoscaling based on request volume, latency, queue depth, and database saturation metrics.
+- Put the system behind an API gateway or edge layer for rate limiting, auth enforcement, and traffic shaping.
 
-```bash
-curl -X POST http://localhost:4000/auth/register \
-  -H "Content-Type: application/json" \
-  -H "x-idempotency-key: register-1" \
-  -d '{"name":"John Doe","email":"john@example.com","password":"password123"}'
-```
+### Database design
 
-Example login request:
+- Keep transfers and deposits strongly consistent on the write path using PostgreSQL transactions.
+- Partition high-volume tables such as `ledger_transactions` and `ledger_entries`, most likely by time and possibly by wallet range once data grows large enough.
+- Add carefully chosen covering indexes for the most common history and balance-access patterns.
+- Continue storing a balance snapshot on the wallet for fast reads, while treating ledger records as the audit trail.
+- Introduce archival and cold-storage strategies for older transaction history so hot tables remain smaller and faster.
 
-```bash
-curl -X POST http://localhost:4000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"john@example.com","password":"password123"}'
-```
+### Queues and asynchronous processing
 
-Example deposit request:
+- Keep balance-changing writes synchronous, but move non-critical follow-up work to queues.
+- Queue jobs for notifications, exports, reconciliation reports, analytics pipelines, fraud checks, and webhook delivery.
+- Use an outbox-style pattern so events are recorded transactionally before being published to background workers.
+- Add idempotent consumers and dead-letter queues so retries do not create duplicate side effects.
 
-```bash
-curl -X POST http://localhost:4000/wallet/deposit \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <JWT_TOKEN>" \
-  -H "x-idempotency-key: deposit-1" \
-  -d '{"amount":5000}'
-```
+### Caching
 
-Example transfer request:
+- Cache non-critical read-heavy responses such as profile lookups, recent transaction pages, and metadata.
+- Avoid using cache as the source of truth for balances during writes; balances should still come from the transactional store.
+- Use short-lived cache entries or explicit invalidation after deposit and transfer operations for endpoints that can safely be cached.
+- Consider Redis for token/session support, rate limiting, and lightweight read models.
 
-```bash
-curl -X POST http://localhost:4000/wallet/transfer \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <JWT_TOKEN>" \
-  -H "x-idempotency-key: transfer-1" \
-  -d '{"to_user_id":"<RECIPIENT_USER_ID>","amount":1000}'
-```
+### Monitoring and observability
 
-Example balance request:
+- Add structured logs with request IDs, user IDs, transaction IDs, and idempotency keys for traceability.
+- Track metrics for throughput, p95/p99 latency, serialization retries, lock waits, failed transfers, queue lag, and database connection pool health.
+- Instrument distributed tracing across API requests, database calls, and async workers.
+- Set alerts for balance mismatches, unusual failure spikes, replica lag, queue backlogs, and database resource saturation.
+- Add reconciliation jobs and dashboards so the team can detect ledger inconsistencies or operational drift quickly.
 
-```bash
-curl http://localhost:4000/wallet/me/balance \
-  -H "Authorization: Bearer <JWT_TOKEN>"
-```
+In short, I would preserve strong consistency for money movement, but scale reads, background work, and operational visibility around that core so the system stays reliable under much higher throughput.
 
-## Scaling to 10 Million Transactions Per Day
 
-If this system needed to process 10 million transactions per day, I would scale it in several layers:
-
-- Split reads from writes using primary-replica PostgreSQL and move history/balance read traffic onto replicas where safe.
-- Partition ledger tables by time or wallet ranges to keep indexes smaller and improve write/read performance.
-- Introduce queue-backed ingestion for non-interactive workloads such as external deposits, reconciliations, notifications, and exports.
-- Maintain derived balance projections or materialized views for read performance, while keeping the ledger as the source of truth.
-- Add stronger operational tooling: metrics for transfer latency, lock waits, idempotency conflicts, failed transactions, and reconciliation mismatches.
-- Use distributed tracing, structured logs, dashboards, and alerting around transaction failures and database saturation.
-- Add rate limiting, per-tenant isolation strategies, and possibly shard wallets across databases once a single primary becomes the bottleneck.
-
-## What To Improve Next
-
-Given more time, I would add:
-
-- automated tests for concurrent transfer scenarios
-- refresh tokens and token revocation support
-- reconciliation jobs and operational admin endpoints
-- pagination and filtering for transaction history
-- online schema rollout checks for zero-downtime deploys
